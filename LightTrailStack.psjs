@@ -1,0 +1,111 @@
+const app = require("photoshop").app;
+const psAction = require("photoshop").action;
+const fileSystem = require("uxp").storage.localFileSystem;
+
+const inputFolder = await fileSystem.getFolder();
+const itemsInFolder = await inputFolder.getEntries();
+const inputFiles = itemsInFolder.filter((item)=>item.isFile);
+
+const intermediateStepOutputFolder = await fileSystem.getFolder();
+
+const maskFile = await fileSystem.getFileForOpening();
+
+if (inputFiles.length < 2)
+{
+    app.showAlert("Less than 2 images found in input folder. Aborting");
+    return;
+}
+
+let maskDoc
+if (maskFile !== undefined)
+{
+    maskDoc = await app.open(maskFile);
+}
+
+let resultDoc;
+let currentDoc;
+for (let i=0; i<inputFiles.length; ++i)
+{
+    currentDoc = await app.open(inputFiles[i]);    
+    if (i==0)
+    {
+        resultDoc = await currentDoc.duplicate("LightTrailStack"); 
+    }
+    else
+    {
+        await blendImage(resultDoc, currentDoc, maskDoc);
+    }
+    
+    if (intermediateStepOutputFolder !== undefined)
+    {
+        saveIntermediateStepFile(resultDoc, i, currentDoc.name);
+    }
+    currentDoc.close();
+}
+
+if (maskDoc !== undefined) { maskDoc.close(); }
+console.log('Action completed');
+
+// *******************************************************
+// Helper functions
+// *******************************************************
+async function blendImage(targetDoc, sourceDoc, maskDoc)
+{
+    let command;
+    let retVal;
+
+    app.activeDocument = sourceDoc;
+
+    // select all of sourceDoc
+    command = {"_obj":"set","_target":[{"_property":"selection","_ref":"channel"}],"to":{"_enum":"ordinal","_value":"allEnum"}};
+    retVal = await psAction.batchPlay([command], {});
+
+    // copy to clipboard
+    command = {"_obj":"copyEvent","copyHint":"pixels"};
+    retVal = await psAction.batchPlay([command], {});
+    
+    app.activeDocument = targetDoc;
+    if (maskDoc !== undefined)
+    {
+        await applyMaskToActiveDocument(maskDoc);
+    }    
+
+    // paste sourceDoc from clipboard as a new layer
+    command = {"_obj":"paste","antiAlias":{"_enum":"antiAliasType","_value":"antiAliasNone"},"as":{"_class":"pixel"}};
+    retVal = await psAction.batchPlay([command], {});
+    
+    // set current layer blending mode to 'lighten'
+    command = {"_obj":"set","_target":[{"_enum":"ordinal","_ref":"layer","_value":"targetEnum"}],"to":{"_obj":"layer","mode":{"_enum":"blendMode","_value":"lighten"}}};
+    retVal = await psAction.batchPlay([command], {});
+    
+    command = {"_obj":"flattenImage"};
+    retVal = await psAction.batchPlay([command], {});
+}
+
+async function applyMaskToActiveDocument(maskDoc)
+{
+    let command;
+    let result;
+
+    command = {
+        "_obj": "set",
+        "_target": [{"_property":"selection","_ref":"channel"}],
+        "to": {
+            "_ref": [
+                {"_enum":"ordinal", "_ref":"channel", "_value":"targetEnum"},
+                {"_name":maskDoc.name, "_ref":"document"}
+            ]
+        }
+    };
+    result = await psAction.batchPlay([command], {});
+    
+    command = {"_obj":"make","at":{"_enum":"channel","_ref":"channel","_value":"mask"},"new":{"_class":"channel"},"using":{"_enum":"userMaskEnabled","_value":"revealSelection"}};
+    result = await psAction.batchPlay([command], {});    
+}
+
+async function saveIntermediateStepFile(resultDoc, stepIndex, stepFileName)
+{
+    const outputFileName = "STX" + String(stepIndex).padStart(6, 0) + "_" + stepFileName;
+    const outputFile = await intermediateStepOutputFolder.createFile(outputFileName);
+    resultDoc.saveAs.jpg(outputFile, { quality: 12 }, true);   
+}
