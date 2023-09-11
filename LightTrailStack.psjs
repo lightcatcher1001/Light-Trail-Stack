@@ -112,9 +112,19 @@ async function applyMaskToActiveDocument(maskDoc)
     result = await psAction.batchPlay([command], {});    
 }
 
+function getFileExtension(fileName)
+{
+    const lastIndex = fileName.lastIndexOf(".");
+    const fileExtension = fileName.substring(lastIndex + 1);
+    return fileExtension;    
+}
+
 async function saveIntermediateStepFile(resultDoc, stepIndex, stepFileName, outputFolder)
 {
-    const outputFileName = "LTS" + String(stepIndex).padStart(6, 0) + "_" + stepFileName;
+    const stepFileNameExtension = getFileExtension(stepFileName);
+    const outputFileNameExtension = stepFileNameExtension === "jpg" || 
+                                    stepFileNameExtension === "jpeg" ? "" : ".jpg"; // append .jpg extension if current format is not jpg
+    const outputFileName = `LTS${String(stepIndex).padStart(6, 0)}_${stepFileName}${outputFileNameExtension}`;
     const outputFile = await outputFolder.createFile(outputFileName);
     resultDoc.saveAs.jpg(outputFile, { quality: 12 }, true);   
 }
