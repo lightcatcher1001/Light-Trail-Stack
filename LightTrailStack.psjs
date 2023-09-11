@@ -2,49 +2,58 @@ const app = require("photoshop").app;
 const psAction = require("photoshop").action;
 const fileSystem = require("uxp").storage.localFileSystem;
 
-const inputFolder = await fileSystem.getFolder();
-const itemsInFolder = await inputFolder.getEntries();
-const inputFiles = itemsInFolder.filter((item)=>item.isFile);
-
-const intermediateStepOutputFolder = await fileSystem.getFolder();
-
-const maskFile = await fileSystem.getFileForOpening();
-
-if (inputFiles.length < 2)
+// *******************************************************
+// Helper classes
+// *******************************************************
+class ScriptInputDialogViewModel
 {
-    app.showAlert("Less than 2 images found in input folder. Aborting");
-    return;
-}
+    dialogResultPromise;
+    inputFolderDisplayElement;
+    outputFolderDisplayElement;
+    maskFileDisplayElement;
 
-let maskDoc
-if (maskFile !== undefined)
-{
-    maskDoc = await app.open(maskFile);
-}
+    get sourceFolder() { return this._sourceFolder; }
+    get outputFolder() { return this._outputFolder; }
+    get maskFile() { return this._maskFile; }
+    get isDialogResultOK() { return this._isDialogResultOK === true; }
 
-let resultDoc;
-let currentDoc;
-for (let i=0; i<inputFiles.length; ++i)
-{
-    currentDoc = await app.open(inputFiles[i]);    
-    if (i==0)
+    async selectInputFolderButtonClicked()
     {
-        resultDoc = await currentDoc.duplicate("LightTrailStack"); 
+        const folderEntry = await fileSystem.getFolder();
+        if (folderEntry) {
+            this.inputFolderDisplayElement.innerHTML = `<b>Source Folder:</b> ${folderEntry.nativePath}`;
+            this._sourceFolder = folderEntry;
+        }        
     }
-    else
-    {
-        await blendImage(resultDoc, currentDoc, maskDoc);
-    }
-    
-    if (intermediateStepOutputFolder !== undefined)
-    {
-        saveIntermediateStepFile(resultDoc, i, currentDoc.name);
-    }
-    currentDoc.close();
-}
 
-if (maskDoc !== undefined) { maskDoc.close(); }
-console.log('Action completed');
+    async selectOutputFolderButtonClicked()
+    {
+        const folderEntry = await fileSystem.getFolder();
+        if (folderEntry) {
+            this.outputFolderDisplayElement.innerHTML = `<b>Output Folder:</b> ${folderEntry.nativePath}`;
+            this._outputFolder = folderEntry;
+        }
+    }
+
+    async selectMaskFileButtonClicked()
+    {
+        const fileEntry = await fileSystem.getFileForOpening();
+        if (fileEntry) {
+            this.maskFileDisplayElement.innerHTML = `<b>Mask File:</b> ${fileEntry.nativePath}`;
+            this._maskFile = fileEntry;
+        }
+    }
+
+    okButtonClicked()
+    {
+        this._isDialogResultOK = true;
+    }
+
+    cancellButtonClicked()
+    {
+        this._isDialogResultOK = false;
+    }
+}
 
 // *******************************************************
 // Helper functions
@@ -103,9 +112,169 @@ async function applyMaskToActiveDocument(maskDoc)
     result = await psAction.batchPlay([command], {});    
 }
 
-async function saveIntermediateStepFile(resultDoc, stepIndex, stepFileName)
+async function saveIntermediateStepFile(resultDoc, stepIndex, stepFileName, outputFolder)
 {
-    const outputFileName = "STX" + String(stepIndex).padStart(6, 0) + "_" + stepFileName;
-    const outputFile = await intermediateStepOutputFolder.createFile(outputFileName);
+    const outputFileName = "LTS" + String(stepIndex).padStart(6, 0) + "_" + stepFileName;
+    const outputFile = await outputFolder.createFile(outputFileName);
     resultDoc.saveAs.jpg(outputFile, { quality: 12 }, true);   
 }
+
+function createScriptInputDialog(dialogVM) 
+{
+    const dialog = document.createElement("dialog");
+    dialog.style.color = "white";
+    const div = document.createElement("div");
+    div.style.display = "block";
+    div.style.height = "275px";
+    div.style.width = "550px";
+
+    createAndAddButton(div, "Select Source Images Folder", 
+        async () => await dialogVM.selectInputFolderButtonClicked());
+    dialogVM.inputFolderDisplayElement = document.createElement("p");
+    dialogVM.inputFolderDisplayElement.style.marginLeft = "15px";
+    div.appendChild(dialogVM.inputFolderDisplayElement);       
+    
+    createAndAddButton(div, "Select Output Folder (optional)",
+        async () => await dialogVM.selectOutputFolderButtonClicked());
+    dialogVM.outputFolderDisplayElement = document.createElement("p");
+    dialogVM.outputFolderDisplayElement.style.marginLeft = "15px";
+    div.appendChild(dialogVM.outputFolderDisplayElement);
+
+    createAndAddButton(div, "Select Mask File (optional)",
+        async () => await dialogVM.selectMaskFileButtonClicked());
+    dialogVM.maskFileDisplayElement = document.createElement("p");
+    dialogVM.maskFileDisplayElement.style.marginLeft = "15px";
+    dialogVM.maskFileDisplayElement.style.marginBottom = "35px";
+    div.appendChild(dialogVM.maskFileDisplayElement);    
+
+    const dialogOKBtn = createAndAddButton(div, "Ok", () => dialogVM.okButtonClicked());
+    createAndAddButton(div, "Cancel", () => dialog.close());
+
+    dialogVM.dialogResultPromise = new Promise((resolve, reject) => {
+        try {
+            dialogOKBtn.addEventListener("click", () => {
+                dialog.close();
+                resolve(dialogVM);
+            })
+
+            dialog.addEventListener("cancel", () => {
+                resolve(dialogVM);
+            });
+
+            dialog.addEventListener("close", () => {
+                resolve(dialogVM);
+            });
+        } catch (e) {
+            console.log(e);
+            reject(e);
+        }
+    })
+
+    dialog.appendChild(div);
+    return dialog;
+
+    // local helper functions
+    function createAndAddButton(container, buttonText, buttonClickHandler, id)
+    {
+        const btn = document.createElement("button");
+        btn.textContent = buttonText;
+        if (buttonClickHandler !== undefined) { btn.onclick = buttonClickHandler; }
+        if (id !== undefined) { btn.id = id; }
+
+        container.appendChild(btn);
+        return btn;
+    }
+}
+
+async function showScriptInputDialog()
+{
+    const dialogVM = new ScriptInputDialogViewModel();
+    let dialog = createScriptInputDialog(dialogVM);
+    document.body.appendChild(dialog).showModal();
+
+    return dialogVM.dialogResultPromise;
+}
+
+async function getImageFilesInFolder(imageFolder)
+{
+    const imageExtensions = ["jpg", "jpeg", "tif", "tiff", "png", "bmp", "gif"];
+    const itemsInFolder = await imageFolder.getEntries();
+    const imageFiles = itemsInFolder.filter(item => {
+        if (!item.isFile) { return false; }
+        const lastIndex = item.name.lastIndexOf(".");
+        const fileExtension = item.name.substring(lastIndex + 1);
+        return imageExtensions.includes(fileExtension);
+    });
+    
+    imageFiles.sort((a, b) => a.name.localeCompare(b.name));
+    return imageFiles;
+}
+
+// *******************************************************
+// Main Script Function
+// *******************************************************
+async function main()
+{
+    const scriptInputData = await showScriptInputDialog();
+    if (!scriptInputData.isDialogResultOK) { return; }
+    
+    const sourceFolder = scriptInputData.sourceFolder;
+    if (!sourceFolder)
+    {
+        app.showAlert("Source image folder is not set. Aborting");
+        return;
+    }
+
+    const sourceImageFiles = await getImageFilesInFolder(sourceFolder);
+    if (sourceImageFiles.length < 2)
+    {
+        app.showAlert("Less than 2 images found in source image folder. Aborting");
+        return;
+    }
+    
+    const intermediateStepOutputFolder = scriptInputData.outputFolder;
+    if (intermediateStepOutputFolder)
+    {
+        const imageFilesInOutputFolder = await getImageFilesInFolder(intermediateStepOutputFolder);
+        if (imageFilesInOutputFolder.length > 0)
+        {
+            app.showAlert("Existing images found in output folder. Aborting")
+            return;
+        }
+    }
+
+    const maskFile = scriptInputData.maskFile;
+    
+    let maskDoc
+    if (maskFile !== undefined)
+    {
+        maskDoc = await app.open(maskFile);
+    }
+    
+    let resultDoc;
+    let currentDoc;
+    for (let i=0; i<sourceImageFiles.length; ++i)
+    {
+        currentDoc = await app.open(sourceImageFiles[i]);    
+        if (i==0)
+        {
+            resultDoc = await currentDoc.duplicate("LightTrailStack"); 
+        }
+        else
+        {
+            await blendImage(resultDoc, currentDoc, maskDoc);
+        }
+        
+        if (intermediateStepOutputFolder !== undefined)
+        {
+            saveIntermediateStepFile(resultDoc, i, currentDoc.name, intermediateStepOutputFolder);
+        }
+        await currentDoc.close();
+    }
+    
+    if (maskDoc !== undefined) { await maskDoc.close(); }
+    await app.showAlert("Light trail stacking completed.")
+}
+
+// run script
+await main();
