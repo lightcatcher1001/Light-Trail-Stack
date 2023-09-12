@@ -134,31 +134,41 @@ function createScriptInputDialog(dialogVM)
     const dialog = document.createElement("dialog");
     dialog.style.color = "white";
     const div = document.createElement("div");
+    div.style.position = "relative"
     div.style.display = "block";
     div.style.height = "275px";
     div.style.width = "550px";
 
-    createAndAddButton(div, "Select Source Images Folder", 
+    let btnTemp;
+    btnTemp = createAndAddButton(div, "Select Source Image Folder", 
         async () => await dialogVM.selectInputFolderButtonClicked());
+    btnTemp.style.minWidth = 210;
     dialogVM.inputFolderDisplayElement = document.createElement("p");
     dialogVM.inputFolderDisplayElement.style.marginLeft = "15px";
     div.appendChild(dialogVM.inputFolderDisplayElement);       
     
-    createAndAddButton(div, "Select Output Folder (optional)",
+    btnTemp = createAndAddButton(div, "Select Output Folder (optional)",
         async () => await dialogVM.selectOutputFolderButtonClicked());
+    btnTemp.style.minWidth = 210;
     dialogVM.outputFolderDisplayElement = document.createElement("p");
     dialogVM.outputFolderDisplayElement.style.marginLeft = "15px";
     div.appendChild(dialogVM.outputFolderDisplayElement);
 
-    createAndAddButton(div, "Select Mask File (optional)",
+    btnTemp = createAndAddButton(div, "Select Mask File (optional)",
         async () => await dialogVM.selectMaskFileButtonClicked());
+    btnTemp.style.minWidth = 210;
     dialogVM.maskFileDisplayElement = document.createElement("p");
     dialogVM.maskFileDisplayElement.style.marginLeft = "15px";
-    dialogVM.maskFileDisplayElement.style.marginBottom = "35px";
     div.appendChild(dialogVM.maskFileDisplayElement);    
 
     const dialogOKBtn = createAndAddButton(div, "Ok", () => dialogVM.okButtonClicked());
-    createAndAddButton(div, "Cancel", () => dialog.close());
+    dialogOKBtn.style.position = "absolute";
+    dialogOKBtn.style.bottom = 0;
+
+    btnTemp = createAndAddButton(div, "Cancel", () => dialog.close());
+    btnTemp.style.position = "absolute";
+    btnTemp.style.bottom = 0;
+    btnTemp.style.left = 72;
 
     dialogVM.dialogResultPromise = new Promise((resolve, reject) => {
         try {
@@ -200,7 +210,7 @@ async function showScriptInputDialog()
 {
     const dialogVM = new ScriptInputDialogViewModel();
     let dialog = createScriptInputDialog(dialogVM);
-    document.body.appendChild(dialog).showModal();
+    document.body.appendChild(dialog).showModal({"title": "Light Trail Stack"});
 
     return dialogVM.dialogResultPromise;
 }
@@ -231,14 +241,14 @@ async function main()
     const sourceFolder = scriptInputData.sourceFolder;
     if (!sourceFolder)
     {
-        app.showAlert("Source image folder is not set. Aborting");
+        await app.showAlert("Source image folder is not set. Aborting");
         return;
     }
 
     const sourceImageFiles = await getImageFilesInFolder(sourceFolder);
     if (sourceImageFiles.length < 2)
     {
-        app.showAlert("Less than 2 images found in source image folder. Aborting");
+        await app.showAlert("Less than 2 images found in source image folder. Aborting");
         return;
     }
     
